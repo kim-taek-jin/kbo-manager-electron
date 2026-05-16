@@ -10,7 +10,17 @@ import MarketView from './views/MarketView';
 import MatchView from './views/MatchView';
 
 const parsePositions = (rawPos, isPitcher) => {
-  if (isPitcher) return ['SP', 'RP', 'CP'];
+  if (isPitcher) {
+    const normalized = rawPos.toUpperCase();
+    const isSP = normalized.includes('SP') || normalized.includes('선발');
+    const isCP = normalized.includes('CP') || normalized.includes('클로저') || normalized.includes('마무리');
+    const isRP = normalized.includes('RP') || normalized.includes('중간');
+
+    if (isSP) return ['SP', 'RP'];
+    if (isCP) return ['CP', 'RP'];
+    if (isRP) return ['RP', 'CP'];
+    return ['SP', 'RP', 'CP'];
+  }
 
   const caps = [];
   if (rawPos.includes('포수') || rawPos.includes('C')) caps.push('C');
@@ -121,27 +131,26 @@ const buildAutoTeam = (players) => {
   });
 
   const selectedPitchers = [];
-  const choosePitchers = (pos, count) => {
-    sortByOverall(pitchers)
-      .filter((player) => player.caps.includes(pos) && !selectedIds.has(player.id))
-      .slice(0, count)
-      .forEach((player) => {
-        selectedPitchers.push({ ...player, assignedPos: pos });
-        selectedIds.add(player.id);
-      });
-  };
-
-  choosePitchers('SP', 5);
-  choosePitchers('RP', 5);
-  choosePitchers('CP', 1);
-
-  sortByOverall(pitchers)
-    .filter((player) => !selectedIds.has(player.id))
-    .slice(0, Math.max(0, 11 - selectedPitchers.length))
-    .forEach((player) => {
-      selectedPitchers.push({ ...player, assignedPos: player.caps[0] || 'RP' });
+  const choosePitchers = (desired, fallbackSlots, count) => {
+    const candidates = sortByOverall(pitchers).filter(
+      (player) => !selectedIds.has(player.id) && player.caps.some((cap) => [desired, ...fallbackSlots].includes(cap))
+    );
+    candidates.slice(0, count).forEach((player) => {
+      const assigned = player.caps.includes(desired) ? desired : player.caps.find((cap) => [desired, ...fallbackSlots].includes(cap));
+      selectedPitchers.push({ ...player, assignedPos: assigned || desired });
       selectedIds.add(player.id);
     });
+  };
+
+  choosePitchers('SP', ['SP'], 5);
+  choosePitchers('CP', ['RP'], 1);
+  choosePitchers('RP', ['CP'], 5);
+
+  const remainingPitchers = sortByOverall(pitchers).filter((player) => !selectedIds.has(player.id));
+  remainingPitchers.slice(0, Math.max(0, 11 - selectedPitchers.length)).forEach((player) => {
+    selectedPitchers.push({ ...player, assignedPos: player.caps.includes('RP') ? 'RP' : player.caps[0] || 'RP' });
+    selectedIds.add(player.id);
+  });
 
   return [...selectedBatters.slice(0, 9), ...selectedPitchers.slice(0, 11)];
 };
