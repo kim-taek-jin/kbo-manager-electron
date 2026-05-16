@@ -25,6 +25,7 @@ const Sidebar = ({ activeTab, onTabChange, onUploadCSV }) => {
     { id: 'league', label: '🏆 리그 순위표' },
     { id: 'stats', label: '🏅 개인 기록 순위' },
     { id: 'roster', label: '📋 1군 로스터' },
+    { id: 'tactics', label: '⚙️ 전술 및 라인업 설정' },
     { id: 'trade', label: '🔄 트레이드' },
     { id: 'market', label: '💰 이적 시장' },
     { id: 'match', label: '⚾ 정규시즌' },

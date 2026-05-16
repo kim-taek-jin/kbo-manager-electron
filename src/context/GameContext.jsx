@@ -1,5 +1,18 @@
 import React, { createContext, useContext, useReducer } from 'react';
 
+const INITIAL_STANDINGS = [
+  { team: 'KIA 타이거즈', wins: 0, losses: 0, ties: 0 },
+  { team: '삼성 라이온즈', wins: 0, losses: 0, ties: 0 },
+  { team: 'LG 트윈스', wins: 0, losses: 0, ties: 0 },
+  { team: '두산 베어스', wins: 0, losses: 0, ties: 0 },
+  { team: 'KT 위즈', wins: 0, losses: 0, ties: 0 },
+  { team: 'SSG 랜더스', wins: 0, losses: 0, ties: 0 },
+  { team: '롯데 자이언츠', wins: 0, losses: 0, ties: 0 },
+  { team: 'NC 다이노스', wins: 0, losses: 0, ties: 0 },
+  { team: '한화 이글스', wins: 0, losses: 0, ties: 0 },
+  { team: '키움 히어로즈', wins: 0, losses: 0, ties: 0 },
+];
+
 // 게임 상태 Context
 export const GameContext = createContext();
 
@@ -11,6 +24,10 @@ export const GameProvider = ({ children }) => {
     tradeBlock: [],
     faMarket: [],
     allPlayersRegistry: [],
+    tactics: {
+      battingOrder: [],
+      pitcherRoles: {},
+    },
     popScore: 50,
     facStadiumLvl: 1,
     facMarketLvl: 1,
@@ -19,7 +36,7 @@ export const GameProvider = ({ children }) => {
     sponsorType: 'safe',
     fundSafe: 0,
     fundRisky: 0,
-    standings: [],
+    standings: INITIAL_STANDINGS,
     currentRound: 1,
     mySchedule: [],
     gameStarted: false,
@@ -69,6 +86,8 @@ function gameReducer(state, action) {
       return { ...state, budget: state.budget + action.payload };
     case 'SET_ALL_PLAYERS':
       return { ...state, allPlayersRegistry: action.payload };
+    case 'SET_TACTICS':
+      return { ...state, tactics: { ...state.tactics, ...action.payload } };
     default:
       return state;
   }
