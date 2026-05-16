@@ -2,13 +2,20 @@ import React from 'react';
 import { useGameContext } from '../../context/GameContext';
 
 const RosterView = ({ onAutoLineup }) => {
-  const { state } = useGameContext();
+  const { state, dispatch } = useGameContext();
   const allPlayers = state.allPlayersRegistry || [];
   const myTeam = state.myTeam || [];
   const activeCount = allPlayers.length;
   const batters = allPlayers.filter((player) => !player.isPitcher);
   const pitchers = allPlayers.filter((player) => player.isPitcher);
   const rosterPlayers = myTeam.length > 0 ? myTeam : allPlayers.slice(0, 20);
+
+  const handleRemovePlayer = (playerId) => {
+    dispatch({
+      type: 'SET_MY_TEAM',
+      payload: myTeam.filter((player) => player.id !== playerId),
+    });
+  };
 
   return (
     <div>
@@ -44,12 +51,13 @@ const RosterView = ({ onAutoLineup }) => {
             <th>WAR</th>
             <th>G</th>
             <th>연봉</th>
+            <th>액션</th>
           </tr>
         </thead>
         <tbody id="roster-tbody">
           {rosterPlayers.length === 0 ? (
             <tr>
-              <td colSpan="8" style={{ color: '#888' }}>
+              <td colSpan="9" style={{ color: '#888' }}>
                 데이터를 업로드해주세요.
               </td>
             </tr>
@@ -66,6 +74,15 @@ const RosterView = ({ onAutoLineup }) => {
                 <td>{player.estimatedWAR ?? '-'}</td>
                 <td>{player.games ?? '-'}</td>
                 <td>{player.salary}억</td>
+                <td>
+                  <button
+                    className="action-btn"
+                    disabled={myTeam.length <= 1}
+                    onClick={() => handleRemovePlayer(player.id)}
+                  >
+                    제거
+                  </button>
+                </td>
               </tr>
             ))
           )}

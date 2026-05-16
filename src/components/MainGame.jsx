@@ -96,6 +96,24 @@ const buildHeaderMap = (headerLine) => {
   };
 };
 
+const getHeaderValue = (cols, header, names) => {
+  const idx = header.index(names);
+  return idx >= 0 && idx < cols.length ? cols[idx] : '';
+};
+
+const TEAM_SHORT_MAP = {
+  'KIA 타이거즈': 'KIA',
+  '삼성 라이온즈': '삼성',
+  'LG 트윈스': 'LG',
+  '두산 베어스': '두산',
+  'KT 위즈': 'KT',
+  'SSG 랜더스': 'SSG',
+  '롯데 자이언츠': '롯데',
+  'NC 다이노스': 'NC',
+  '한화 이글스': '한화',
+  '키움 히어로즈': '키움',
+};
+
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 const estimateBatterWAR = ({ avg, games, hr, rbi }) => {
@@ -111,6 +129,81 @@ const estimatePitcherWAR = ({ era, whip, so, wpct, sv, hld, games }) => {
 };
 
 const sortByOverall = (players) => players.slice().sort((a, b) => b.overall - a.overall);
+
+const getTeamShortName = (teamName) => TEAM_SHORT_MAP[teamName] || teamName;
+
+const buildTeamRoster = (players, teamName) => {
+  const teamKey = getTeamShortName(teamName);
+  const teamPlayers = players.filter(
+    (player) => player.team === teamKey || player.team === teamName
+  );
+  if (teamPlayers.length === 0) {
+    return buildAutoTeam(players);
+  }
+
+  const batters = teamPlayers.filter((player) => !player.isPitcher).sort((a, b) => b.overall - a.overall);
+  const pitchers = teamPlayers.filter((player) => player.isPitcher).sort((a, b) => b.overall - a.overall);
+  const selectedBatters = [];
+  const selectedIds = new Set();
+  const batterPositions = ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'DH'];
+
+  batterPositions.forEach((pos) => {
+    const best = batters.find((player) => !selectedIds.has(player.id) && player.caps.includes(pos));
+    if (best) {
+      selectedBatters.push({ ...best, assignedPos: pos });
+      selectedIds.add(best.id);
+    }
+  });
+
+  batters
+    .filter((player) => !selectedIds.has(player.id))
+    .slice(0, Math.max(0, 9 - selectedBatters.length))
+    .forEach((player) => {
+      selectedBatters.push({ ...player, assignedPos: player.caps[0] || 'DH' });
+      selectedIds.add(player.id);
+    });
+
+  const selectedPitchers = [];
+  const choosePitchers = (desired, fallback, count) => {
+    const candidates = pitchers.filter(
+      (player) =>
+        !selectedIds.has(player.id) &&
+        player.caps.some((cap) => [desired, ...fallback].includes(cap))
+    );
+    candidates.slice(0, count).forEach((player) => {
+      const assigned = player.caps.includes(desired)
+        ? desired
+        : player.caps.find((cap) => fallback.includes(cap)) || desired;
+      selectedPitchers.push({ ...player, assignedPos: assigned });
+      selectedIds.add(player.id);
+    });
+  };
+
+  choosePitchers('SP', ['RP', 'CP'], 5);
+  choosePitchers('CP', ['RP'], 1);
+  choosePitchers('RP', ['CP'], 5);
+
+  pitchers
+    .filter((player) => !selectedIds.has(player.id))
+    .slice(0, Math.max(0, 11 - selectedPitchers.length))
+    .forEach((player) => {
+      selectedPitchers.push({
+        ...player,
+        assignedPos: player.caps.includes('RP') ? 'RP' : player.caps[0] || 'SP',
+      });
+      selectedIds.add(player.id);
+    });
+
+  const roster = [...selectedBatters.slice(0, 9), ...selectedPitchers.slice(0, 11)];
+  const remainder = teamPlayers.filter((player) => !selectedIds.has(player.id));
+  return roster
+    .concat(
+      remainder
+        .slice(0, Math.max(0, 20 - roster.length))
+        .map((player) => ({ ...player, assignedPos: player.caps[0] || (player.isPitcher ? 'RP' : 'DH') }))
+    )
+    .slice(0, 20);
+};
 
 const buildAutoTeam = (players) => {
   const batters = players.filter((player) => !player.isPitcher);
@@ -165,15 +258,15 @@ const buildAutoTeam = (players) => {
 };
 
 const buildPlayerFromRow = (cols, header) => {
-  const rawPos = (cols[header.index(['position', 'pos', '포지션'])] || cols[0] || '').trim();
-  const name = (cols[header.index(['name', 'player', '선수명'])] || cols[1] || '').trim();
-  const team = (cols[header.index(['team', 'club', '소속팀', '소속'])] || cols[2] || '무소속').trim();
+  const rawPos = (getHeaderValue(cols, header, ['position', 'pos', '포지션']) || cols[0] || '').trim();
+  const name = (getHeaderValue(cols, header, ['name', 'player', '선수명']) || cols[1] || '').trim();
+  const team = (getHeaderValue(cols, header, ['team', 'club', '소속팀', '소속']) || cols[2] || '무소속').trim();
   if (!name) return null;
 
   const isPitcher = rawPos.includes('투수') || rawPos.toUpperCase().includes('SP') || rawPos.toUpperCase().includes('RP') || rawPos.toUpperCase().includes('CP');
   const games =
-    parseInt(cols[header.index(['g', 'games'])], 10) ||
-    parseInt(cols[header.index(['gs', 'games started'])], 10) ||
+    parseInt(getHeaderValue(cols, header, ['g', 'games']), 10) ||
+    parseInt(getHeaderValue(cols, header, ['gs', 'games started']), 10) ||
     0;
   const salaryBase = Math.max(3, Math.floor(4 + games * 0.05));
 
@@ -311,20 +404,32 @@ const MainGame = () => {
 
   useEffect(() => {
     if (state.allPlayersRegistry.length > 0 && state.myTeam.length === 0) {
-      dispatch({ type: 'SET_MY_TEAM', payload: buildAutoTeam(state.allPlayersRegistry) });
+      if (state.userTeamName) {
+        dispatch({ type: 'SET_MY_TEAM', payload: buildTeamRoster(state.allPlayersRegistry, state.userTeamName) });
+      } else {
+        dispatch({ type: 'SET_MY_TEAM', payload: buildAutoTeam(state.allPlayersRegistry) });
+      }
     }
-  }, [dispatch, state.allPlayersRegistry, state.myTeam.length]);
+  }, [dispatch, state.allPlayersRegistry, state.myTeam.length, state.userTeamName]);
 
   const handleCSVUpload = (csvText) => {
     const players = parseCSVData(csvText, '업로드된');
     if (players.length > 0) {
       dispatch({ type: 'SET_ALL_PLAYERS', payload: players });
-      dispatch({ type: 'SET_MY_TEAM', payload: buildAutoTeam(players) });
+      if (state.userTeamName) {
+        dispatch({ type: 'SET_MY_TEAM', payload: buildTeamRoster(players, state.userTeamName) });
+      } else {
+        dispatch({ type: 'SET_MY_TEAM', payload: buildAutoTeam(players) });
+      }
     }
   };
 
   const handleAutoLineup = () => {
-    dispatch({ type: 'SET_MY_TEAM', payload: buildAutoTeam(state.allPlayersRegistry) });
+    if (state.userTeamName) {
+      dispatch({ type: 'SET_MY_TEAM', payload: buildTeamRoster(state.allPlayersRegistry, state.userTeamName) });
+    } else {
+      dispatch({ type: 'SET_MY_TEAM', payload: buildAutoTeam(state.allPlayersRegistry) });
+    }
   };
 
   const renderView = () => {

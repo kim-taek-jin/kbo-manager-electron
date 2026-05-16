@@ -17,7 +17,13 @@ const MatchView = () => {
   const teamOffense = batters.slice(0, 9).reduce((sum, player) => sum + player.overall, 0);
   const teamPitching = pitchers.slice(0, 11).reduce((sum, player) => sum + player.overall, 0);
 
+  const seasonComplete = state.currentRound > 144;
+
   const simulateOneGame = () => {
+    if (seasonComplete) {
+      setMatchMessage('정규시즌이 종료되었습니다. 가을야구 준비 중입니다.');
+      return;
+    }
     if (myTeam.length < 9) {
       setMatchMessage('로스터가 부족합니다. 9명 이상의 선수단을 구성하세요.');
       return;
@@ -42,6 +48,10 @@ const MatchView = () => {
   };
 
   const simulateMultipleGames = (count) => {
+    if (seasonComplete) {
+      setMatchMessage('정규시즌이 종료되었습니다. 가을야구 준비 중입니다.');
+      return;
+    }
     if (myTeam.length < 9) {
       setMatchMessage('로스터가 부족합니다. 9명 이상의 선수단을 구성하세요.');
       return;
@@ -85,7 +95,11 @@ const MatchView = () => {
         </span>
       </h2>
 
-      {state.currentRound > 132 ? (
+      {seasonComplete ? (
+        <div id="playoff-banner" className="playoff-banner">
+          🍂 정규시즌 종료. 가을야구를 준비하세요.
+        </div>
+      ) : state.currentRound > 132 ? (
         <div id="playoff-banner" className="playoff-banner">
           🏆 포스트시즌 진출 경쟁 중! 남은 경기 승리가 중요합니다.
         </div>
@@ -113,10 +127,10 @@ const MatchView = () => {
           <button className="action-btn" disabled>
             🎮 개입 모드 (직접 감독)
           </button>
-          <button className="action-btn fast" onClick={simulateOneGame}>
+          <button className="action-btn fast" disabled={seasonComplete} onClick={simulateOneGame}>
             ▶ 1경기 결과 보기 (빠른 시뮬)
           </button>
-          <button className="action-btn fast" onClick={() => simulateMultipleGames(10)}>
+          <button className="action-btn fast" disabled={seasonComplete} onClick={() => simulateMultipleGames(10)}>
             ⏩ 10경기 쾌속 자동 진행
           </button>
         </div>

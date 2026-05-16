@@ -1,13 +1,28 @@
 import React from 'react';
 import { useGameContext } from '../../context/GameContext';
 
+const TEAM_SHORT_MAP = {
+  'KIA 타이거즈': 'KIA',
+  '삼성 라이온즈': '삼성',
+  'LG 트윈스': 'LG',
+  '두산 베어스': '두산',
+  'KT 위즈': 'KT',
+  'SSG 랜더스': 'SSG',
+  '롯데 자이언츠': '롯데',
+  'NC 다이노스': 'NC',
+  '한화 이글스': '한화',
+  '키움 히어로즈': '키움',
+};
+
 const MarketView = () => {
   const { state, dispatch } = useGameContext();
   const allPlayers = state.allPlayersRegistry || [];
   const myTeam = state.myTeam || [];
   const existingIds = new Set(myTeam.map((player) => player.id));
+  const selectedTeam = state.userTeamName;
+  const teamShort = TEAM_SHORT_MAP[selectedTeam] || selectedTeam;
   const marketPlayers = allPlayers
-    .filter((player) => !existingIds.has(player.id))
+    .filter((player) => !existingIds.has(player.id) && (!teamShort || player.team !== teamShort))
     .sort((a, b) => b.overall - a.overall)
     .slice(0, 10);
 
