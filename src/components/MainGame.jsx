@@ -33,13 +33,46 @@ const MainGame = () => {
   };
 
   const parseCSVData = useCallback((csvText, source = '기본') => {
-    const lines = csvText.trim().split(/\r?\n/).filter((line) => line.trim().length > 0);
+    const rawLines = csvText.split(/\r?\n/);
+    // Find the first non-empty header line
+    let headerIndex = -1;
+    for (let i = 0; i < rawLines.length; i += 1) {
+      if (rawLines[i] && rawLines[i].trim().length > 0) {
+        const first = rawLines[i].split(',')[0].trim().toLowerCase();
+        if (first === '포지션' || first === 'position' || first === '포지션') {
+          headerIndex = i;
+          break;
+        }
+      }
+    }
+
+    if (headerIndex === -1) {
+      setCsvStatus('CSV 형식 오류: 헤더를 찾을 수 없습니다.');
+      return;
+    }
+
+    const headerLine = rawLines[headerIndex];
+    const headers = headerLine.split(',').map((h) => h.trim().toLowerCase());
+    const idx = (name) => headers.findIndex((h) => h.includes(name));
+
+    const avgIdx = idx('avg');
+    const paIdx = idx('pa');
+    const abIdx = idx('ab');
+    const hIdx = idx('h');
+    const hrIdx = idx('hr');
+    const tbIdx = idx('tb');
+
     const players = [];
     let idCount = 1;
 
-    for (let i = 1; i < lines.length; i += 1) {
-      const cols = lines[i].split(',').map((col) => col.trim());
-      if (cols.length < 4 || !cols[1]) continue;
+    for (let i = headerIndex + 1; i < rawLines.length; i += 1) {
+      const line = rawLines[i];
+      if (!line || line.trim().length === 0) continue;
+      const cols = line.split(',').map((c) => c.trim());
+      const firstCol = (cols[0] || '').toLowerCase();
+      if (firstCol === '포지션' || firstCol === 'position') continue; // skip repeated headers
+
+      if (!cols[1]) continue;
 
       const rawPos = cols[0] || '';
       const name = cols[1] || '';
@@ -55,22 +88,23 @@ const MainGame = () => {
       let s_hr = 0;
 
       if (isPitcher) {
-        const era = parseFloat(cols[3]) || 4.5;
-        const ip = parseFloat(cols[5]) || 0;
-        const bb = parseInt(cols[8], 10) || 0;
-        const so = parseInt(cols[10], 10) || 0;
+        // minimal fallback for pitchers
+        const era = parseFloat(cols[avgIdx]) || 4.5;
+        const ip = parseFloat(cols[paIdx]) || 0;
+        const bb = parseInt(cols[abIdx], 10) || 0;
+        const so = parseInt(cols[hIdx], 10) || 0;
 
         contact = Math.min(99, Math.max(55, Math.floor(74 - (era - 3.5) * 5 + Math.random() * 5)));
         power = Math.min(99, Math.max(55, Math.floor(70 - (era - 3.5) * 3 + Math.random() * 6)));
         eye = Math.min(99, Math.max(55, Math.floor(68 - bb * 0.8 + so * 0.2 + Math.random() * 4)));
         salary = Math.max(3, Math.floor(6 + ip / 45));
       } else {
-        const avg = parseFloat(cols[3]) || 0;
-        const pa = parseInt(cols[4], 10) || 0;
-        const ab = parseInt(cols[5], 10) || 0;
-        const h = parseInt(cols[7], 10) || 0;
-        const hr = parseInt(cols[10], 10) || 0;
-        const tb = parseInt(cols[12], 10) || 0;
+        const avg = avgIdx >= 0 ? parseFloat(cols[avgIdx]) : 0;
+        const pa = paIdx >= 0 ? parseInt(cols[paIdx], 10) : 0;
+        const ab = abIdx >= 0 ? parseInt(cols[abIdx], 10) : 0;
+        const h = hIdx >= 0 ? parseInt(cols[hIdx], 10) : 0;
+        const hr = hrIdx >= 0 ? parseInt(cols[hrIdx], 10) : 0;
+        const tb = tbIdx >= 0 ? parseInt(cols[tbIdx], 10) : 0;
 
         contact = Math.min(99, Math.max(40, Math.floor(42 + avg * 140)));
         power = Math.min(99, Math.max(40, Math.floor(40 + ((tb - h) / (ab || 1)) * 150)));
