@@ -57,6 +57,8 @@ function gameReducer(state, action) {
       return { ...state, faMarket: action.payload };
     case 'SET_STANDINGS':
       return { ...state, standings: action.payload };
+    case 'SET_CURRENT_ROUND':
+      return { ...state, currentRound: action.payload };
     case 'SET_SPONSOR_TYPE':
       return { ...state, sponsorType: action.payload };
     case 'SET_GAME_STARTED':

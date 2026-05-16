@@ -62,15 +62,24 @@ const splitCSVLine = (line) => {
   return values;
 };
 
-const findHeaderIndex = (line) => {
+const isHeaderLine = (line) => {
   const columns = splitCSVLine(line).map((cell) => cell.trim().toLowerCase());
-  return columns.findIndex(
-    (value) =>
-      value === '포지션' ||
-      value === 'position' ||
-      value === '선수명' ||
-      value === 'name'
-  );
+  const headerIndicators = [
+    'position',
+    'pos',
+    '포지션',
+    '선수명',
+    'name',
+    'team',
+    'club',
+    '소속',
+    'avg',
+    'era',
+    'ip',
+    'g',
+    'games',
+  ];
+  return columns.some((value) => headerIndicators.some((indicator) => value.includes(indicator)));
 };
 
 const buildHeaderMap = (headerLine) => {
@@ -156,13 +165,16 @@ const buildAutoTeam = (players) => {
 };
 
 const buildPlayerFromRow = (cols, header) => {
-  const rawPos = (cols[0] || '').trim();
-  const name = (cols[1] || '').trim();
-  const team = (cols[2] || '무소속').trim();
+  const rawPos = (cols[header.index(['position', 'pos', '포지션'])] || cols[0] || '').trim();
+  const name = (cols[header.index(['name', 'player', '선수명'])] || cols[1] || '').trim();
+  const team = (cols[header.index(['team', 'club', '소속팀', '소속'])] || cols[2] || '무소속').trim();
   if (!name) return null;
 
-  const isPitcher = rawPos.includes('투수') || rawPos.includes('SP') || rawPos.includes('RP') || rawPos.includes('CP');
-  const games = parseInt(cols[header.index(['g', 'games'])], 10) || 0;
+  const isPitcher = rawPos.includes('투수') || rawPos.toUpperCase().includes('SP') || rawPos.toUpperCase().includes('RP') || rawPos.toUpperCase().includes('CP');
+  const games =
+    parseInt(cols[header.index(['g', 'games'])], 10) ||
+    parseInt(cols[header.index(['gs', 'games started'])], 10) ||
+    0;
   const salaryBase = Math.max(3, Math.floor(4 + games * 0.05));
 
   const player = {
@@ -235,7 +247,7 @@ const MainGame = () => {
     const rawLines = csvText.split(/\r?\n/);
     let headerIndex = -1;
     for (let i = 0; i < rawLines.length; i += 1) {
-      if (rawLines[i] && rawLines[i].trim().length > 0 && findHeaderIndex(rawLines[i]) >= 0) {
+      if (rawLines[i] && rawLines[i].trim().length > 0 && isHeaderLine(rawLines[i])) {
         headerIndex = i;
         break;
       }
@@ -252,17 +264,8 @@ const MainGame = () => {
 
     for (let i = headerIndex + 1; i < rawLines.length; i += 1) {
       const line = rawLines[i];
-      if (!line || line.trim().length === 0) continue;
+      if (!line || line.trim().length === 0 || isHeaderLine(line)) continue;
       const cols = splitCSVLine(line).map((c) => c.trim());
-      const firstCol = (cols[0] || '').trim().toLowerCase();
-      const secondCol = (cols[1] || '').trim().toLowerCase();
-      if (
-        firstCol === '포지션' ||
-        firstCol === 'position' ||
-        secondCol === '선수명' ||
-        secondCol === 'name'
-      )
-        continue;
       const player = buildPlayerFromRow(cols, header);
       if (!player) continue;
       player.id = idCount;
