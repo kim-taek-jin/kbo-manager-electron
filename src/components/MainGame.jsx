@@ -9,151 +9,285 @@ import TradeView from './views/TradeView';
 import MarketView from './views/MarketView';
 import MatchView from './views/MatchView';
 
+const parsePositions = (rawPos, isPitcher) => {
+  if (isPitcher) return ['SP', 'RP', 'CP'];
+
+  const caps = [];
+  if (rawPos.includes('포수') || rawPos.includes('C')) caps.push('C');
+  if (rawPos.includes('1루수') || rawPos.includes('1B')) caps.push('1B');
+  if (rawPos.includes('2루수') || rawPos.includes('2B')) caps.push('2B');
+  if (rawPos.includes('3루수') || rawPos.includes('3B')) caps.push('3B');
+  if (rawPos.includes('유격수') || rawPos.includes('SS')) caps.push('SS');
+  if (rawPos.includes('좌익수') || rawPos.includes('LF')) caps.push('LF');
+  if (rawPos.includes('중견수') || rawPos.includes('CF')) caps.push('CF');
+  if (rawPos.includes('우익수') || rawPos.includes('RF')) caps.push('RF');
+  if (rawPos.includes('DH') || rawPos.includes('지명')) caps.push('DH');
+
+  return caps.length > 0 ? caps : ['DH'];
+};
+
+const splitCSVLine = (line) => {
+  const values = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+    if (char === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      values.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+
+  values.push(current);
+  return values;
+};
+
+const findHeaderIndex = (line) => {
+  const columns = splitCSVLine(line).map((cell) => cell.trim().toLowerCase());
+  return columns.findIndex(
+    (value) =>
+      value === '포지션' ||
+      value === 'position' ||
+      value === '선수명' ||
+      value === 'name'
+  );
+};
+
+const buildHeaderMap = (headerLine) => {
+  const headers = splitCSVLine(headerLine).map((h) => h.trim().toLowerCase());
+  return {
+    headerNames: headers,
+    index: (names) => {
+      const lowerNames = names.map((name) => name.toLowerCase());
+      let idx = headers.findIndex((header) => lowerNames.includes(header));
+      if (idx >= 0) return idx;
+      idx = headers.findIndex((header) => lowerNames.some((name) => header.includes(name)));
+      return idx;
+    },
+  };
+};
+
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+const estimateBatterWAR = ({ avg, games, hr, rbi }) => {
+  const base = avg * 12 + hr * 0.2 + rbi * 0.08;
+  const gameWeight = Math.min(1, games / 140);
+  return Math.max(0, Math.round(base * gameWeight * 10) / 10);
+};
+
+const estimatePitcherWAR = ({ era, whip, so, wpct, sv, hld, games }) => {
+  const rawScore = (3.8 - era) * 1.8 + (1.5 - whip) * 3 + so * 0.08 + wpct * 8 + (sv + hld) * 0.25;
+  const gameWeight = Math.min(1, games / 50);
+  return Math.max(0, Math.round(rawScore * gameWeight * 10) / 10);
+};
+
+const sortByOverall = (players) => players.slice().sort((a, b) => b.overall - a.overall);
+
+const buildAutoTeam = (players) => {
+  const batters = players.filter((player) => !player.isPitcher);
+  const pitchers = players.filter((player) => player.isPitcher);
+
+  const selectBestByPosition = (list, position) =>
+    list
+      .filter((player) => player.caps.includes(position))
+      .sort((a, b) => b.overall - a.overall)[0];
+
+  const selectedBatters = [];
+  const selectedIds = new Set();
+  const batterPositions = ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'DH'];
+
+  batterPositions.forEach((pos) => {
+    const best = selectBestByPosition(batters, pos);
+    if (best && !selectedIds.has(best.id)) {
+      selectedBatters.push({ ...best, assignedPos: pos });
+      selectedIds.add(best.id);
+    }
+  });
+
+  const remainingBatters = sortByOverall(batters).filter((player) => !selectedIds.has(player.id));
+  remainingBatters.slice(0, Math.max(0, 9 - selectedBatters.length)).forEach((player) => {
+    selectedBatters.push({ ...player, assignedPos: player.caps[0] || 'DH' });
+    selectedIds.add(player.id);
+  });
+
+  const selectedPitchers = [];
+  const choosePitchers = (pos, count) => {
+    sortByOverall(pitchers)
+      .filter((player) => player.caps.includes(pos) && !selectedIds.has(player.id))
+      .slice(0, count)
+      .forEach((player) => {
+        selectedPitchers.push({ ...player, assignedPos: pos });
+        selectedIds.add(player.id);
+      });
+  };
+
+  choosePitchers('SP', 5);
+  choosePitchers('RP', 5);
+  choosePitchers('CP', 1);
+
+  sortByOverall(pitchers)
+    .filter((player) => !selectedIds.has(player.id))
+    .slice(0, Math.max(0, 11 - selectedPitchers.length))
+    .forEach((player) => {
+      selectedPitchers.push({ ...player, assignedPos: player.caps[0] || 'RP' });
+      selectedIds.add(player.id);
+    });
+
+  return [...selectedBatters.slice(0, 9), ...selectedPitchers.slice(0, 11)];
+};
+
+const buildPlayerFromRow = (cols, header) => {
+  const rawPos = (cols[0] || '').trim();
+  const name = (cols[1] || '').trim();
+  const team = (cols[2] || '무소속').trim();
+  if (!name) return null;
+
+  const isPitcher = rawPos.includes('투수') || rawPos.includes('SP') || rawPos.includes('RP') || rawPos.includes('CP');
+  const games = parseInt(cols[header.index(['g', 'games'])], 10) || 0;
+  const salaryBase = Math.max(3, Math.floor(4 + games * 0.05));
+
+  const player = {
+    team,
+    displayPos: rawPos || (isPitcher ? '투수' : '지명타자'),
+    caps: parsePositions(rawPos, isPitcher),
+    assignedPos: null,
+    name,
+    status: 'BENCH',
+    isPitcher,
+    fatigue: 100,
+    recentForm: [],
+    estimatedWAR: 0,
+    games,
+    overall: 0,
+    stats: {},
+  };
+
+  if (isPitcher) {
+    const era = parseFloat(cols[header.index(['era'])]) || 5.0;
+    const ip = parseFloat(cols[header.index(['ip'])]) || 0;
+    const so = parseInt(cols[header.index(['so', 'strikeouts'])], 10) || 0;
+    const bb = parseInt(cols[header.index(['bb', 'walks'])], 10) || 0;
+    const whip = parseFloat(cols[header.index(['whip'])]) || Math.max(1.0, bb / (ip || 1));
+    const wpct = parseFloat(cols[header.index(['wpct', 'winningpercentage'])]) || 0;
+    const sv = parseInt(cols[header.index(['sv', 'saves'])], 10) || 0;
+    const hld = parseInt(cols[header.index(['hld', 'holds'])], 10) || 0;
+
+    player.stats = { era, ip, so, bb, whip, wpct, sv, hld, games };
+    player.estimatedWAR = estimatePitcherWAR({ era, whip, so, wpct, sv, hld, games });
+    player.salary = Math.max(salaryBase, Math.floor(5 + ip / 30 + player.estimatedWAR * 0.8));
+    player.contact = clamp(Math.floor(78 - (era - 3.6) * 4 + wpct * 8 + player.estimatedWAR * 1.1), 55, 99);
+    player.power = clamp(Math.floor(72 - (era - 3.6) * 3 + (2 - whip) * 9 + player.estimatedWAR * 0.9), 55, 99);
+    player.eye = clamp(Math.floor(70 - whip * 4 + wpct * 11 + (sv + hld) * 1.5 + player.estimatedWAR * 0.8), 55, 99);
+    player.overall = clamp(Math.round((player.contact * 0.35 + player.power * 0.3 + player.eye * 0.35)), 40, 99);
+    player.tier = player.overall >= 90 ? 'S' : player.overall >= 80 ? 'A' : player.overall >= 70 ? 'B' : 'C';
+  } else {
+    const avg = parseFloat(cols[header.index(['avg', 'battingaverage'])]) || 0;
+    const pa = parseInt(cols[header.index(['pa', 'plateappearances'])], 10) || 0;
+    const ab = parseInt(cols[header.index(['ab', 'atbats'])], 10) || 0;
+    const h = parseInt(cols[header.index(['h', 'hits'])], 10) || 0;
+    const hr = parseInt(cols[header.index(['hr', 'home runs'])], 10) || 0;
+    const tb = parseInt(cols[header.index(['tb', 'totalbases'])], 10) || 0;
+    const rbi = parseInt(cols[header.index(['rbi', 'runsbattedin'])], 10) || 0;
+    const war = parseFloat(cols[header.index(['war'])]) || estimateBatterWAR({ avg, games, hr, rbi });
+
+    player.stats = { avg, pa, ab, h, hr, tb, rbi, games, war };
+    player.estimatedWAR = war;
+    player.salary = Math.max(salaryBase, Math.floor(4 + avg * 18 + games * 0.03 + war * 1.2));
+    player.contact = clamp(Math.floor(45 + avg * 130 + war * 1.5), 40, 99);
+    player.power = clamp(Math.floor(38 + ((tb - h) / (ab || 1)) * 155 + hr * 1.8 + war * 0.8), 40, 99);
+    player.eye = clamp(Math.floor(35 + ((pa - ab) / (pa || 1)) * 180 + games * 0.1 + war * 0.9), 40, 99);
+    player.overall = clamp(Math.round((player.contact * 0.35 + player.power * 0.35 + player.eye * 0.3)), 40, 99);
+    player.tier = player.overall >= 90 ? 'S' : player.overall >= 80 ? 'A' : player.overall >= 70 ? 'B' : 'C';
+    player.s_ab = ab;
+    player.s_h = h;
+    player.s_hr = hr;
+  }
+
+  return player;
+};
+
 const MainGame = () => {
   // eslint-disable-next-line no-unused-vars
   const { state, dispatch } = useGameContext();
   const [activeTab, setActiveTab] = useState('roster');
   const [csvStatus, setCsvStatus] = useState('CSV 데이터 로드 중...');
 
-  const parsePositions = (rawPos, isPitcher) => {
-    if (isPitcher) return ['SP', 'RP', 'CP'];
-
-    const caps = [];
-    if (rawPos.includes('포수') || rawPos.includes('C')) caps.push('C');
-    if (rawPos.includes('1루수') || rawPos.includes('1B')) caps.push('1B');
-    if (rawPos.includes('2루수') || rawPos.includes('2B')) caps.push('2B');
-    if (rawPos.includes('3루수') || rawPos.includes('3B')) caps.push('3B');
-    if (rawPos.includes('유격수') || rawPos.includes('SS')) caps.push('SS');
-    if (rawPos.includes('좌익수') || rawPos.includes('LF')) caps.push('LF');
-    if (rawPos.includes('중견수') || rawPos.includes('CF')) caps.push('CF');
-    if (rawPos.includes('우익수') || rawPos.includes('RF')) caps.push('RF');
-    if (rawPos.includes('DH') || rawPos.includes('지명')) caps.push('DH');
-
-    return caps.length > 0 ? caps : ['DH'];
-  };
-
   const parseCSVData = useCallback((csvText, source = '기본') => {
     const rawLines = csvText.split(/\r?\n/);
-    // Find the first non-empty header line
     let headerIndex = -1;
     for (let i = 0; i < rawLines.length; i += 1) {
-      if (rawLines[i] && rawLines[i].trim().length > 0) {
-        const first = rawLines[i].split(',')[0].trim().toLowerCase();
-        if (first === '포지션' || first === 'position' || first === '포지션') {
-          headerIndex = i;
-          break;
-        }
+      if (rawLines[i] && rawLines[i].trim().length > 0 && findHeaderIndex(rawLines[i]) >= 0) {
+        headerIndex = i;
+        break;
       }
     }
 
     if (headerIndex === -1) {
       setCsvStatus('CSV 형식 오류: 헤더를 찾을 수 없습니다.');
-      return;
+      return [];
     }
 
-    const headerLine = rawLines[headerIndex];
-    const headers = headerLine.split(',').map((h) => h.trim().toLowerCase());
-    const idx = (name) => headers.findIndex((h) => h.includes(name));
-
-    const avgIdx = idx('avg');
-    const paIdx = idx('pa');
-    const abIdx = idx('ab');
-    const hIdx = idx('h');
-    const hrIdx = idx('hr');
-    const tbIdx = idx('tb');
-
+    const header = buildHeaderMap(rawLines[headerIndex]);
     const players = [];
     let idCount = 1;
 
     for (let i = headerIndex + 1; i < rawLines.length; i += 1) {
       const line = rawLines[i];
       if (!line || line.trim().length === 0) continue;
-      const cols = line.split(',').map((c) => c.trim());
-      const firstCol = (cols[0] || '').toLowerCase();
-      if (firstCol === '포지션' || firstCol === 'position') continue; // skip repeated headers
-
-      if (!cols[1]) continue;
-
-      const rawPos = cols[0] || '';
-      const name = cols[1] || '';
-      const team = cols[2] || '무소속';
-      const isPitcher = rawPos.includes('투수');
-
-      let contact = 60;
-      let power = 60;
-      let eye = 60;
-      let salary = 5;
-      let s_ab = 0;
-      let s_h = 0;
-      let s_hr = 0;
-
-      if (isPitcher) {
-        // minimal fallback for pitchers
-        const era = parseFloat(cols[avgIdx]) || 4.5;
-        const ip = parseFloat(cols[paIdx]) || 0;
-        const bb = parseInt(cols[abIdx], 10) || 0;
-        const so = parseInt(cols[hIdx], 10) || 0;
-
-        contact = Math.min(99, Math.max(55, Math.floor(74 - (era - 3.5) * 5 + Math.random() * 5)));
-        power = Math.min(99, Math.max(55, Math.floor(70 - (era - 3.5) * 3 + Math.random() * 6)));
-        eye = Math.min(99, Math.max(55, Math.floor(68 - bb * 0.8 + so * 0.2 + Math.random() * 4)));
-        salary = Math.max(3, Math.floor(6 + ip / 45));
-      } else {
-        const avg = avgIdx >= 0 ? parseFloat(cols[avgIdx]) : 0;
-        const pa = paIdx >= 0 ? parseInt(cols[paIdx], 10) : 0;
-        const ab = abIdx >= 0 ? parseInt(cols[abIdx], 10) : 0;
-        const h = hIdx >= 0 ? parseInt(cols[hIdx], 10) : 0;
-        const hr = hrIdx >= 0 ? parseInt(cols[hrIdx], 10) : 0;
-        const tb = tbIdx >= 0 ? parseInt(cols[tbIdx], 10) : 0;
-
-        contact = Math.min(99, Math.max(40, Math.floor(42 + avg * 140)));
-        power = Math.min(99, Math.max(40, Math.floor(40 + ((tb - h) / (ab || 1)) * 150)));
-        eye = Math.min(99, Math.max(40, Math.floor(40 + ((pa - ab) / (pa || 1)) * 200)));
-        salary = Math.max(3, Math.floor(4 + avg * 20 + Math.random() * 4));
-        s_ab = ab;
-        s_h = h;
-        s_hr = hr;
-      }
-
-      const total = contact + power + eye;
-      let tier = 'C';
-      if (total >= 235) tier = 'S';
-      else if (total >= 200) tier = 'A';
-      else if (total >= 170) tier = 'B';
-
-      players.push({
-        id: idCount,
-        team,
-        displayPos: rawPos || '지명타자',
-        caps: parsePositions(rawPos, isPitcher),
-        assignedPos: null,
-        name,
-        contact,
-        power,
-        eye,
-        tier,
-        salary,
-        status: 'BENCH',
-        isPitcher,
-        s_ab,
-        s_h,
-        s_hr,
-        fatigue: 100,
-        recentForm: [],
-      });
+      const cols = splitCSVLine(line).map((c) => c.trim());
+      const firstCol = (cols[0] || '').trim().toLowerCase();
+      const secondCol = (cols[1] || '').trim().toLowerCase();
+      if (
+        firstCol === '포지션' ||
+        firstCol === 'position' ||
+        secondCol === '선수명' ||
+        secondCol === 'name'
+      )
+        continue;
+      const player = buildPlayerFromRow(cols, header);
+      if (!player) continue;
+      player.id = idCount;
+      players.push(player);
       idCount += 1;
     }
 
-    dispatch({ type: 'SET_ALL_PLAYERS', payload: players });
-    setCsvStatus(`${source} CSV 데이터 로드 완료 · 총 ${players.length}명`);
-  }, [dispatch, setCsvStatus]);
+    if (players.length === 0) {
+      setCsvStatus(`${source} CSV에서 유효한 선수 데이터를 찾을 수 없습니다.`);
+      return [];
+    }
+
+    setCsvStatus(`${source} CSV 데이터 파싱 완료 · ${players.length}명`);
+    return players;
+  }, []);
 
   useEffect(() => {
     const loadKBOData = async () => {
       try {
-        const response = await fetch('/kbo_2025_players.csv');
-        const csvText = await response.text();
-        parseCSVData(csvText, '기본');
+        const [battersResponse, pitchersResponse] = await Promise.all([
+          fetch('/kbo_2025_players.csv'),
+          fetch('/kbo_2025_pitchers.csv'),
+        ]);
+        const [battersText, pitchersText] = await Promise.all([
+          battersResponse.text(),
+          pitchersResponse.text(),
+        ]);
+
+        const batterPlayers = parseCSVData(battersText, '기본 타자');
+        const pitcherPlayers = parseCSVData(pitchersText, '기본 투수');
+        const players = [...batterPlayers, ...pitcherPlayers];
+
+        dispatch({ type: 'SET_ALL_PLAYERS', payload: players });
+        setCsvStatus(`기본 CSV 데이터 로드 완료 · 총 ${players.length}명 (${batterPlayers.length} 타자, ${pitcherPlayers.length} 투수)`);
       } catch (error) {
         console.error('CSV 로드 실패:', error);
         setCsvStatus('CSV 로드에 실패했습니다. 파일을 업로드해주세요.');
@@ -161,10 +295,24 @@ const MainGame = () => {
     };
 
     loadKBOData();
-  }, [parseCSVData]);
+  }, [dispatch, parseCSVData]);
+
+  useEffect(() => {
+    if (state.allPlayersRegistry.length > 0 && state.myTeam.length === 0) {
+      dispatch({ type: 'SET_MY_TEAM', payload: buildAutoTeam(state.allPlayersRegistry) });
+    }
+  }, [dispatch, state.allPlayersRegistry, state.myTeam.length]);
 
   const handleCSVUpload = (csvText) => {
-    parseCSVData(csvText, '업로드된');
+    const players = parseCSVData(csvText, '업로드된');
+    if (players.length > 0) {
+      dispatch({ type: 'SET_ALL_PLAYERS', payload: players });
+      dispatch({ type: 'SET_MY_TEAM', payload: buildAutoTeam(players) });
+    }
+  };
+
+  const handleAutoLineup = () => {
+    dispatch({ type: 'SET_MY_TEAM', payload: buildAutoTeam(state.allPlayersRegistry) });
   };
 
   const renderView = () => {
@@ -176,7 +324,7 @@ const MainGame = () => {
       case 'stats':
         return <StatsView />;
       case 'roster':
-        return <RosterView />;
+        return <RosterView onAutoLineup={handleAutoLineup} />;
       case 'trade':
         return <TradeView />;
       case 'market':

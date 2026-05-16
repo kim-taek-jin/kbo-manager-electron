@@ -1,6 +1,21 @@
 import React from 'react';
+import { useGameContext } from '../../context/GameContext';
 
 const TradeView = () => {
+  const { state, dispatch } = useGameContext();
+  const allPlayers = state.allPlayersRegistry || [];
+  const myTeam = state.myTeam || [];
+  const existingIds = new Set(myTeam.map((player) => player.id));
+  const tradeCandidates = allPlayers
+    .filter((player) => !existingIds.has(player.id))
+    .sort((a, b) => b.overall - a.overall)
+    .slice(0, 14);
+
+  const handleTradeOffer = (player) => {
+    if (myTeam.length >= 20) return;
+    dispatch({ type: 'SET_MY_TEAM', payload: [...myTeam, player] });
+  };
+
   return (
     <div>
       <h2>타 구단 트레이드 블록</h2>
@@ -18,9 +33,32 @@ const TradeView = () => {
           </tr>
         </thead>
         <tbody>
-          <tr>
-            <td colSpan="8">데이터를 업로드해주세요.</td>
-          </tr>
+          {tradeCandidates.length === 0 ? (
+            <tr>
+              <td colSpan="8">데이터를 업로드하거나 선수 데이터를 로드해주세요.</td>
+            </tr>
+          ) : (
+            tradeCandidates.map((player) => (
+              <tr key={player.id}>
+                <td>{player.team}</td>
+                <td>{player.caps.join('/')}</td>
+                <td style={{ textAlign: 'left' }}>{player.name}</td>
+                <td>{player.contact}</td>
+                <td>{player.power}</td>
+                <td>{player.salary}억</td>
+                <td>{Math.max(1, player.salary - 1)}억 + 선수 교환</td>
+                <td>
+                  <button
+                    className="action-btn"
+                    disabled={myTeam.length >= 20}
+                    onClick={() => handleTradeOffer(player)}
+                  >
+                    제안
+                  </button>
+                </td>
+              </tr>
+            ))
+          )}
         </tbody>
       </table>
     </div>

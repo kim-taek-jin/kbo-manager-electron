@@ -1,6 +1,18 @@
 import React from 'react';
+import { useGameContext } from '../../context/GameContext';
 
 const StatsView = () => {
+  const { state } = useGameContext();
+  const allPlayers = state.allPlayersRegistry || [];
+  const batters = allPlayers
+    .filter((player) => !player.isPitcher && player.stats?.avg != null)
+    .sort((a, b) => (b.stats.avg || 0) - (a.stats.avg || 0))
+    .slice(0, 10);
+  const hrLeaders = allPlayers
+    .filter((player) => !player.isPitcher)
+    .sort((a, b) => (b.stats.hr || 0) - (a.stats.hr || 0))
+    .slice(0, 10);
+
   return (
     <div>
       <h2>2026 전력 분석 및 개인 타이틀 홀더</h2>
@@ -21,9 +33,22 @@ const StatsView = () => {
               </tr>
             </thead>
             <tbody>
-              <tr>
-                <td colSpan="6">데이터 로드 중...</td>
-              </tr>
+              {batters.length === 0 ? (
+                <tr>
+                  <td colSpan="6">데이터를 로드하거나 CSV를 업로드해주세요.</td>
+                </tr>
+              ) : (
+                batters.map((player, index) => (
+                  <tr key={player.id}>
+                    <td>{index + 1}</td>
+                    <td>{player.name}</td>
+                    <td>{player.team}</td>
+                    <td>{player.stats.ab ?? '-'}</td>
+                    <td>{player.stats.h ?? '-'}</td>
+                    <td>{player.stats.avg?.toFixed(3) ?? '-'}</td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -42,9 +67,21 @@ const StatsView = () => {
               </tr>
             </thead>
             <tbody>
-              <tr>
-                <td colSpan="5">데이터 로드 중...</td>
-              </tr>
+              {hrLeaders.length === 0 ? (
+                <tr>
+                  <td colSpan="5">데이터를 로드하거나 CSV를 업로드해주세요.</td>
+                </tr>
+              ) : (
+                hrLeaders.map((player, index) => (
+                  <tr key={player.id}>
+                    <td>{index + 1}</td>
+                    <td>{player.name}</td>
+                    <td>{player.team}</td>
+                    <td>{player.stats.ab ?? '-'}</td>
+                    <td>{player.stats.hr ?? '-'}</td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

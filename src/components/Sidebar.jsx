@@ -54,7 +54,7 @@ const Sidebar = ({ activeTab, onTabChange, onUploadCSV }) => {
         <div className="budget-title">구단 잔여 예산</div>
         <div className="budget-amount">{Math.floor(state.budget)}억 원</div>
         <div style={{ fontSize: '0.82rem', color: 'var(--muted)', marginTop: '6px' }}>
-          총 연봉: <span id="total-salary">0</span>억 원
+          선수단: <strong>{state.myTeam?.length || 0}</strong>/20 명
         </div>
       </div>
 
